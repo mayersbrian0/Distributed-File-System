@@ -40,7 +40,15 @@ int open_serverfd(int port) {
     return serverfd;
 }
 
-
+//thread routine: handle connection with individual client
+void *handle_connection(void *thread_args) {
+    int connection_fd = *((int *)thread_args);
+    pthread_detach(pthread_self()); //no need to call pthread_join()
+    free(thread_args); //free space
+    printf("Here\n");
+    close(connection_fd); //client can now stop waiting
+    return NULL;
+}
 
 int main(int argc, char** argv) {
     int serverfd, *connect_fd, port, clientlen=sizeof(struct sockaddr_in), timeout = -1;
@@ -48,37 +56,22 @@ int main(int argc, char** argv) {
     char *ptr;
     pthread_t thread_id;
 
-    if (argc < 2 || argc > 3) {
-        fprintf(stderr, "Usage %s <port> <timeout>\n", argv[0]);
+    if (argc != 3) {
+        fprintf(stderr, "Usage %s [DIR] [PORT]\n", argv[0]);
         exit(0);
     }
 
-    if (argc == 3) {
-        timeout = strtol(argv[2], &ptr, 10);
-        if (*ptr != '\0') { printf("Invalid Timeout\n"); exit(0); } //check for errors
-    }
-
-    port = strtol(argv[1], &ptr, 10);
+    port = strtol(argv[2], &ptr, 10);
     if (*ptr != '\0' || port <= 1024) { printf("Invalid Port Number\n"); exit(0); } //check for errors
 
     serverfd = open_serverfd(port);
     if (serverfd < 0) { printf("Error connecting to port %d\n", port); exit(0); }
 
-    pthread_mutex_init(&ip_mutex, NULL);
-    pthread_mutex_init(&page_mutex, NULL);
-
-    struct cache_node* head = (struct cache_node*)malloc(sizeof(struct cache_node)); //pointer to the head of the BST
-    memset(head->hex_string, 0, 33);
-
     //server terminates on ctl-c
     while (1) {
         connect_fd = malloc(sizeof(int)); //allocate space for pointer
         *connect_fd = accept(serverfd, (struct sockaddr *)&clientaddr, &clientlen); //start accepting requests
-        thread_args *thread_values = malloc(sizeof(thread_values));
-        thread_values->conn_fd = connect_fd;
-        thread_values->tree_head = head;
-        thread_values->timeout = timeout;
-        pthread_create(&thread_id, NULL, handle_connection, thread_values); //pass new file descripotr to thread routine
+        pthread_create(&thread_id, NULL, handle_connection, connect_fd); //pass new file descripotr to thread routine
     }
 
     //TODO: free with sigint handler (NOTE infinte loop)

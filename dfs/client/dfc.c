@@ -6,8 +6,10 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <netdb.h> 
+#include <openssl/md5.h>
 
 #define MAX_FILENAME_LEN 50
+#define PORT 9000
 
 //hold the config files information
 typedef struct {
@@ -87,9 +89,83 @@ config* create_config(char* cfg_file) {
     return config_data;
 }
 
-//list files on a server
-void list() {
+/*
+Computes MD5 hash of the file and then determines which servers to split the file on
+*/
+int md5_hash(FILE* fp) {
+    int bytes, v1, v2, v3, v4, nhash;
+    char data[1024];
+    char hash[MD5_DIGEST_LENGTH];
+    int hash_mod = 0;
 
+    bzero(data, 1024);
+    MD5_CTX context;
+    MD5_Init(&context);
+    while ((bytes = fread(data, 1, 1024, fp)) > 0) {
+        MD5_Update(&context, data, bytes);
+        bzero(data, 1024);
+    }
+    MD5_Final(hash, &context);
+
+    sscanf( &hash[0], "%x", &v1 );
+    sscanf( &hash[8], "%x", &v2 );
+    sscanf( &hash[16], "%x", &v3 );
+    sscanf( &hash[24], "%x", &v4 );
+    hash_mod = (v1 ^ v2 ^ v3 ^ v4) % 4;
+
+    printf("%d\n", hash_mod);
+    return hash_mod;
+}
+
+/*
+Connects to servers listed in dfs.conf
+*/
+int create_connection(char* ip_port) {
+    int sockfd, connfd, port_num;
+    struct sockaddr_in servaddr, cli;
+    struct hostent *server;
+
+    sockfd = socket(AF_INET, SOCK_STREAM, 0);
+    if (sockfd == -1) { printf("Error Creating Socket\n"); exit(-1);}
+    bzero(&servaddr, sizeof(servaddr));
+    servaddr.sin_family = AF_INET;
+
+    for (char* p = ip_port; *p; p++) {
+        if (*p == ':') {
+            port_num = atoi(p +1); //get the port number 
+            *p = '\0'; //null out port info
+            break;
+        }
+    }
+
+    strtok(ip_port, ":");
+    server = gethostbyname(ip_port); //get the ip addr
+    bcopy((char *)server->h_addr_list[0], (char *)&servaddr.sin_addr.s_addr, server->h_length);
+    servaddr.sin_port = htons(port_num);
+
+    if (connect(sockfd, (struct sockaddr_in*)&servaddr, sizeof(servaddr)) != 0) { printf("Connection failed wit %s:%d\n", ip_port, port_num); return -1;} 
+    return 0;
+}
+
+//list files on a server
+void list(config* config_data) {
+    int conn1, conn2, conn3, conn4;
+    for (int i = 0; i < 4; i++) {
+        switch (i) {
+            case 0:
+                create_connection(config_data->dfs1);
+                break;
+            case 1:
+                create_connection(config_data->dfs2);
+                break;
+            case 2:
+                create_connection(config_data->dfs3);
+                break;
+            case 3:
+                create_connection(config_data->dfs4);
+                break;
+        }
+    }
 }
 
 //put a file on the servers
@@ -140,7 +216,7 @@ int main(int argc, char** argv) {
 
         else if (strncmp("list", input, 4) == 0) {
             printf("list\n");
-            list();
+            list(config_data);
         }
 
         else if (strncmp("exit", input, 4) == 0) {
@@ -151,7 +227,7 @@ int main(int argc, char** argv) {
             printf("Invalid Command\n");
         }
     }
-
+    
     if (input) free(input); //free the line
 
     return 0;
