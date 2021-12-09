@@ -9,7 +9,6 @@
 #include <openssl/md5.h>
 
 #define MAX_FILENAME_LEN 50
-#define PORT 9000
 
 //hold the config files information
 typedef struct {
@@ -124,13 +123,16 @@ int create_connection(char* ip_port) {
     int sockfd, connfd, port_num;
     struct sockaddr_in servaddr, cli;
     struct hostent *server;
+    char temp[40];
+    bzero(temp, 40);
+    strncpy(temp,ip_port, strlen(ip_port));
 
     sockfd = socket(AF_INET, SOCK_STREAM, 0);
     if (sockfd == -1) { printf("Error Creating Socket\n"); exit(-1);}
     bzero(&servaddr, sizeof(servaddr));
     servaddr.sin_family = AF_INET;
 
-    for (char* p = ip_port; *p; p++) {
+    for (char* p = temp; *p; p++) {
         if (*p == ':') {
             port_num = atoi(p +1); //get the port number 
             *p = '\0'; //null out port info
@@ -138,34 +140,100 @@ int create_connection(char* ip_port) {
         }
     }
 
-    strtok(ip_port, ":");
-    server = gethostbyname(ip_port); //get the ip addr
+    strtok(temp, ":");
+    server = gethostbyname(temp); //get the ip addr
     bcopy((char *)server->h_addr_list[0], (char *)&servaddr.sin_addr.s_addr, server->h_length);
     servaddr.sin_port = htons(port_num);
+    if (connect(sockfd, (struct sockaddr_in*)&servaddr, sizeof(servaddr)) != 0) { printf("Connection failed with %s:%d\n", temp, port_num); return -1;} 
+    
+    return sockfd;
+}
 
-    if (connect(sockfd, (struct sockaddr_in*)&servaddr, sizeof(servaddr)) != 0) { printf("Connection failed wit %s:%d\n", ip_port, port_num); return -1;} 
-    return 0;
+//send command to server(s)
+void send_command(config* config_data, int conn_fd, char* req_buffer) {
+    ssize_t bytes_sent = -1;
+    //excahnge the command and username/password
+    bzero(req_buffer, 1024);
+    sprintf(req_buffer, "list %s %s", config_data->username, config_data->password);
+    bytes_sent = write(conn_fd, req_buffer, strlen(req_buffer));
+    if (bytes_sent == -1) { printf("Connection error\n"); exit(-1); }
+}
+
+//get response from server(s)
+void get_response(int conn_fd, char* req_buffer) {
+    ssize_t bytes_read;
+    //wait for response
+    bzero(req_buffer, 1024);
+    bytes_read = read(conn_fd, req_buffer, 1024);
+    if (bytes_read == -1) { printf("Connection error\n"); exit(-1); }
+    printf("%s\n", req_buffer);
 }
 
 //list files on a server
 void list(config* config_data) {
     int conn1, conn2, conn3, conn4;
+    ssize_t bytes_read;
+    char req_buffer[1024];
+
+    //connect to the four servers
     for (int i = 0; i < 4; i++) {
         switch (i) {
             case 0:
-                create_connection(config_data->dfs1);
+                conn1 = create_connection(config_data->dfs1);
                 break;
             case 1:
-                create_connection(config_data->dfs2);
+                conn2 = create_connection(config_data->dfs2);
                 break;
             case 2:
-                create_connection(config_data->dfs3);
+                conn3 = create_connection(config_data->dfs3);
                 break;
             case 3:
-                create_connection(config_data->dfs4);
+                conn4 = create_connection(config_data->dfs4);
                 break;
         }
     }
+    
+    //send the command and username/password to open servers
+    for (int i = 0; i < 4; i++) {
+        switch (i) {
+            case 0:
+                if (conn1 != -1) send_command(config_data, conn1, req_buffer);
+                break;
+            case 1:
+                if (conn2 != -1) send_command(config_data, conn2, req_buffer);
+                break;
+            case 2:
+                if (conn3 != -1) send_command(config_data, conn3, req_buffer);
+                break;
+            case 3:
+                if (conn3 != -1) send_command(config_data, conn4, req_buffer);
+                break;
+        }
+    }   
+    
+    //get response from servers: either invalid or confirmation about sending the file
+    for (int i = 0; i < 4; i++) {
+        switch (i) {
+            case 0:
+                if (conn1 != -1) get_response(conn1, req_buffer);
+                break;
+            case 1:
+                if (conn2 != -1) get_response(conn2, req_buffer);
+                break;
+            case 2:
+                if (conn3 != -1) get_response(conn3, req_buffer);
+                break;
+            case 3:
+                if (conn3 != -1) get_response(conn4, req_buffer);
+                break;
+        }
+    }
+
+    //close(conn1);
+    //close(conn2);
+    //close(conn3);
+    //close(conn4);
+    
 }
 
 //put a file on the servers
@@ -199,6 +267,7 @@ int main(int argc, char** argv) {
     while (1) {
         bzero(filename, MAX_FILENAME_LEN);
         prompt();
+        bzero(input, input_size);
         len = getline(&input, &input_size, stdin);
         if (len == -1) {printf("Error getting input\n"); return -1;}
 
@@ -215,7 +284,6 @@ int main(int argc, char** argv) {
         }
 
         else if (strncmp("list", input, 4) == 0) {
-            printf("list\n");
             list(config_data);
         }
 
