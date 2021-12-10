@@ -20,6 +20,18 @@ typedef struct {
     char dfs4[40];
 } config;
 
+typedef struct {
+    int e1;
+    int e2;
+} tuple;
+
+const tuple file_table[4][4] = {
+    { {1,2}, {2,3}, {3,4}, {4,1} },
+    { {4,1}, {1,2}, {2,3}, {3,4} },
+    { {3,4}, {4,2}, {1,2}, {2,3} },
+    { {1,2}, {2,3}, {3,4}, {4,1} }
+};
+
 //prompt for user
 void prompt() {
     printf("\nCommand Options: \n------------ \n list \n get [file_name] \n put [file_name]\n exit\n------------\n>> ");
@@ -74,16 +86,6 @@ config* create_config(char* cfg_file) {
         count++;        
     }
     if (line) free(line);
-
-    /*
-    printf("%s\n", config_data->dfs1);
-    printf("%s\n", config_data->dfs2);
-    printf("%s\n", config_data->dfs3);
-    printf("%s\n", config_data->dfs4);
-    printf("%s\n", config_data->username);
-    printf("%s\n", config_data->password);
-    */
-
     fclose(fp);
     return config_data;
 }
@@ -91,28 +93,30 @@ config* create_config(char* cfg_file) {
 /*
 Computes MD5 hash of the file and then determines which servers to split the file on
 */
-int md5_hash(FILE* fp) {
+int md5_hash(FILE *fp) {
     int bytes, v1, v2, v3, v4, nhash;
     char data[1024];
-    char hash[MD5_DIGEST_LENGTH];
+    unsigned char hash[MD5_DIGEST_LENGTH];
     int hash_mod = 0;
 
     bzero(data, 1024);
+    bzero(hash, MD5_DIGEST_LENGTH);
     MD5_CTX context;
     MD5_Init(&context);
     while ((bytes = fread(data, 1, 1024, fp)) > 0) {
+        printf("%d\n", bytes);
         MD5_Update(&context, data, bytes);
-        bzero(data, 1024);
     }
+
+    bzero(hash, MD5_DIGEST_LENGTH);
     MD5_Final(hash, &context);
+    for(int i = 0; i < MD5_DIGEST_LENGTH; i++) printf("%02x", hash[i]);
+    sscanf( &hash[0], "%02x", &v1 );
+    sscanf( &hash[8], "%02x", &v2 );
+    sscanf( &hash[16], "%02x", &v3 );
+    sscanf( &hash[24], "%2x", &v4 );
+    hash_mod = (v1 ^ v2 ^ v3 ^ v4);
 
-    sscanf( &hash[0], "%x", &v1 );
-    sscanf( &hash[8], "%x", &v2 );
-    sscanf( &hash[16], "%x", &v3 );
-    sscanf( &hash[24], "%x", &v4 );
-    hash_mod = (v1 ^ v2 ^ v3 ^ v4) % 4;
-
-    printf("%d\n", hash_mod);
     return hash_mod;
 }
 
@@ -150,11 +154,14 @@ int create_connection(char* ip_port) {
 }
 
 //send command to server(s)
-void send_command(config* config_data, int conn_fd, char* req_buffer) {
+void send_command(config* config_data, int conn_fd, char* req_buffer, char* choice, char* filename) {
     ssize_t bytes_sent = -1;
     //excahnge the command and username/password
     bzero(req_buffer, 1024);
-    sprintf(req_buffer, "list %s %s", config_data->username, config_data->password);
+    //handle commands with filenames and ones that don't
+    if (strncmp(choice, "list", 4) == 0) sprintf(req_buffer, "%s %s %s", choice, config_data->username, config_data->password);
+    else sprintf(req_buffer, "%s %s %s %s", choice, filename, config_data->username, config_data->password);
+
     bytes_sent = write(conn_fd, req_buffer, strlen(req_buffer));
     if (bytes_sent == -1) { printf("Connection error\n"); exit(-1); }
 }
@@ -166,11 +173,73 @@ void get_response(int conn_fd, char* req_buffer) {
     bzero(req_buffer, 1024);
     bytes_read = read(conn_fd, req_buffer, 1024);
     if (bytes_read == -1) { printf("Connection error\n"); exit(-1); }
-    printf("%s\n", req_buffer);
+
+    if (strncmp(req_buffer, "ACK", 3) == 0) {
+        return;
+    }
+
+    //exit on invalid username or password
+    else if (strncmp(req_buffer, "Invalid", 7) == 0) {
+        printf("Invalid Username/Password. Exiting\n");
+        exit(0);
+    }
+    
+    else {
+        printf("bad connection with server...\n");
+        exit(-1);
+    }
+}
+
+void list(int conn_fd) {
+    printf("listing files...\n");
+}
+
+//put a file on the servers
+void put(char* filename, int conn1, int conn2, int conn3, int conn4) {
+    FILE* fp;
+    long int file_size; 
+    long int chunk_size;
+    int overfloew, hash;
+
+    printf("sending file %s...\n", filename);
+
+    //get the siez of the file
+    fp = fopen(filename, "rb");
+    if (fp == NULL) {printf("File %s does not exsit\n", filename); return;}
+    fseek(fp, 0, SEEK_END);
+    file_size = ftell(fp);
+    fclose(fp);
+    
+    //break file into pieces
+    hash = md5_hash(filename);
+    overfloew = file_size % 4;
+    chunk_size = file_size /4;
+
+    for (int i = 0; i < 4; i++) {
+        switch (i) {
+            case 0:
+    
+                break;
+            case 1:
+              
+                break;
+            case 2:
+           
+                break;
+            case 3:
+               
+                break;
+        }
+    }
+}
+
+//get a file from the server
+void get(char* filename) {
+    printf("getting file %s...\n", filename);
 }
 
 //list files on a server
-void list(config* config_data) {
+void handle_command(config* config_data, char* choice, char* filename) {
     int conn1, conn2, conn3, conn4;
     ssize_t bytes_read;
     char req_buffer[1024];
@@ -197,16 +266,16 @@ void list(config* config_data) {
     for (int i = 0; i < 4; i++) {
         switch (i) {
             case 0:
-                if (conn1 != -1) send_command(config_data, conn1, req_buffer);
+                if (conn1 != -1) send_command(config_data, conn1, req_buffer, choice, filename);
                 break;
             case 1:
-                if (conn2 != -1) send_command(config_data, conn2, req_buffer);
+                if (conn2 != -1) send_command(config_data, conn2, req_buffer, choice, filename);
                 break;
             case 2:
-                if (conn3 != -1) send_command(config_data, conn3, req_buffer);
+                if (conn3 != -1) send_command(config_data, conn3, req_buffer, choice, filename);
                 break;
             case 3:
-                if (conn3 != -1) send_command(config_data, conn4, req_buffer);
+                if (conn3 != -1) send_command(config_data, conn4, req_buffer, choice, filename);
                 break;
         }
     }   
@@ -215,7 +284,7 @@ void list(config* config_data) {
     for (int i = 0; i < 4; i++) {
         switch (i) {
             case 0:
-                if (conn1 != -1) get_response(conn1, req_buffer);
+                if (conn1 != -1) get_response(conn1, req_buffer); 
                 break;
             case 1:
                 if (conn2 != -1) get_response(conn2, req_buffer);
@@ -224,31 +293,24 @@ void list(config* config_data) {
                 if (conn3 != -1) get_response(conn3, req_buffer);
                 break;
             case 3:
-                if (conn3 != -1) get_response(conn4, req_buffer);
+                if (conn3 != -1) get_response(conn4, req_buffer); 
                 break;
         }
+    }    
+
+    //handle the command if valid "handshake/verification" occurs
+    //program exits there are invalid credentials
+    if (strncmp(choice, "list", 4) == 0) {
+        list(conn1);
     }
 
-    //close(conn1);
-    //close(conn2);
-    //close(conn3);
-    //close(conn4);
-    
-}
+    else if (strncmp(choice, "get", 3) == 0) {
+        get(filename);
+    }
 
-//put a file on the servers
-void put() {
-
-}
-
-//get a file from the server
-void get() {
-
-}
-
-//attemps to verify credentials with the servers
-int send_credentials() {
-    return 0;
+    else if (strncmp(choice, "put", 3) == 0) {
+        put(filename, conn1, conn2, conn3, conn4);
+    }
 }
 
 int main(int argc, char** argv) {
@@ -256,8 +318,12 @@ int main(int argc, char** argv) {
     char * input = NULL;
     size_t input_size = 0;
     ssize_t len;
-    char filename[MAX_FILENAME_LEN];
+    char filename[MAX_FILENAME_LEN], choice[5];
 
+    FILE *fp = fopen("hello.txt", "rb");
+    printf("%d\n", md5_hash(fp));
+    fclose(fp);
+    /*  
     if (argc != 2) { printf("Usage: dfc [config file (.conf)]\n"); return -1;}
 
     config_data = create_config(argv[1]);
@@ -268,23 +334,24 @@ int main(int argc, char** argv) {
         bzero(filename, MAX_FILENAME_LEN);
         prompt();
         bzero(input, input_size);
+        bzero(choice, 10);
+
         len = getline(&input, &input_size, stdin);
         if (len == -1) {printf("Error getting input\n"); return -1;}
 
         if (sscanf(input, "get %s", filename) == 1) {
-            printf("get\n");
-            printf("%s\n", filename);
-            get();
+            strncpy(choice, "get",3);
+            handle_command(config_data, choice, filename);
         } 
 
         else if (sscanf(input, "put %s", filename) == 1) {
-            printf("put\n");
-            printf("%s\n", filename);
-            put();
+            strncpy(choice, "put",3);
+            handle_command(config_data, choice, filename);
         }
 
         else if (strncmp("list", input, 4) == 0) {
-            list(config_data);
+            strncpy(choice, "list",4);
+            handle_command(config_data, choice, NULL);
         }
 
         else if (strncmp("exit", input, 4) == 0) {
@@ -297,6 +364,6 @@ int main(int argc, char** argv) {
     }
     
     if (input) free(input); //free the line
-
+    */
     return 0;
 }
