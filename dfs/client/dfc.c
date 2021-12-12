@@ -9,6 +9,7 @@
 #include <openssl/md5.h>
 
 #define MAX_FILENAME_LEN 50
+#define PACKET_SIZE 1024
 
 //hold the config files information
 typedef struct {
@@ -28,8 +29,8 @@ typedef struct {
 const tuple file_table[4][4] = {
     { {1,2}, {2,3}, {3,4}, {4,1} },
     { {4,1}, {1,2}, {2,3}, {3,4} },
-    { {3,4}, {4,2}, {1,2}, {2,3} },
-    { {1,2}, {2,3}, {3,4}, {4,1} }
+    { {3,4}, {4,1}, {1,2}, {2,3} },
+    { {2,3}, {3,4}, {4,1}, {1,2} }
 };
 
 //prompt for user
@@ -94,9 +95,10 @@ config* create_config(char* cfg_file) {
 Computes MD5 hash of the file and then determines which servers to split the file on
 */
 int md5_hash(FILE *fp) {
-    int bytes, v1, v2, v3, v4, nhash;
+    int bytes, v1= 0, v2 =0, v3=0, v4=0;
     char data[1024];
     unsigned char hash[MD5_DIGEST_LENGTH];
+    unsigned char digest[MD5_DIGEST_LENGTH];
     int hash_mod = 0;
 
     bzero(data, 1024);
@@ -104,19 +106,17 @@ int md5_hash(FILE *fp) {
     MD5_CTX context;
     MD5_Init(&context);
     while ((bytes = fread(data, 1, 1024, fp)) > 0) {
-        printf("%d\n", bytes);
         MD5_Update(&context, data, bytes);
     }
 
     bzero(hash, MD5_DIGEST_LENGTH);
     MD5_Final(hash, &context);
-    for(int i = 0; i < MD5_DIGEST_LENGTH; i++) printf("%02x", hash[i]);
-    sscanf( &hash[0], "%02x", &v1 );
-    sscanf( &hash[8], "%02x", &v2 );
-    sscanf( &hash[16], "%02x", &v3 );
-    sscanf( &hash[24], "%2x", &v4 );
-    hash_mod = (v1 ^ v2 ^ v3 ^ v4);
+    bzero(digest, MD5_DIGEST_LENGTH);
+    for(int i = 0; i < MD5_DIGEST_LENGTH; i++) {
+        sprintf(&digest[i], "%02x", hash[i]);
+    }
 
+    hash_mod = strtol(digest, NULL, 0) % 4;
     return hash_mod;
 }
 
@@ -194,43 +194,146 @@ void list(int conn_fd) {
     printf("listing files...\n");
 }
 
+/*
+//sends the particular file to the 
+void send_file(int conn_fd, int portion, long int chunk_size, int overflow, char* filename) {
+    FILE* fp, *new_fp;
+    char file_contents[1];
+    char temp_filename[40];
+    long int bytes_read = 0;
+    int n;
+
+    if (portion == 4) chunk_size += overflow;
+
+    fp = fopen(filename, "rb");
+    if (fp == NULL) {printf("File %s does not exsit\n", filename); return;}  
+
+    bzero(temp_filename, 40);
+    sprintf(temp_filename, "%s.%d", filename, portion);
+    new_fp = fopen(temp_filename, "wb+");
+    if (fp == NULL) {printf("File %s does not exsit\n", filename); return;} 
+
+    //move the file descriptor location
+    switch(portion) {
+        case 1:
+            fseek(fp, 0, SEEK_SET);
+            break;
+        case 2:
+            fseek(fp, chunk_size, SEEK_SET);
+            break;
+        case 3:
+            fseek(fp, chunk_size*2, SEEK_SET);
+            break;
+        case 4:
+            fseek(fp, chunk_size, SEEK_SET);
+            break;
+    }
+
+    //read the chunk size
+    while (bytes_read < chunk_size && (n = fread(file_contents, 1, 1, fp)) > 0) {
+        bytes_read += n;
+        printf("%s", file_contents);
+        fwrite(file_contents, 1, n, new_fp);
+    }
+    fclose(fp);
+    close(new_fp);
+}
+*/
+
+//chuncks the file to send to the user
+void create_chunks(char* filename,int chunk_size, int overflow) {
+    FILE* fp, *new_fp;
+    char* buffer;
+    char temp_filename[40];
+    int i = 1, n;
+    buffer = (char*) malloc(chunk_size);
+
+    fp = fopen(filename, "rb");
+    if (fp == NULL) {printf("File %s does not exsit\n", filename); return;} 
+
+    bzero(buffer, chunk_size);
+    while ( (n = fread(buffer, 1, chunk_size, fp)) > 0) {
+        bzero(temp_filename, 40);
+        sprintf(temp_filename, "%s.%d", filename, i);
+        new_fp = fopen(temp_filename, "wb+");
+        fwrite(buffer, sizeof(char), n, new_fp);
+        if (overflow != 0) {
+            n = fread(buffer, 1, overflow, fp);
+            fwrite(buffer, sizeof(char), n, new_fp);
+        } 
+        fclose(new_fp);
+        i++;
+    }
+    fclose(fp);
+    free(buffer);
+}
+
+//deletes the temporary chunks
+void free_chunks(char* filename) {
+    
+}
+
 //put a file on the servers
 void put(char* filename, int conn1, int conn2, int conn3, int conn4) {
-    FILE* fp;
+    FILE* fp, *new_fp;
+    int c1, c2;
     long int file_size; 
     long int chunk_size;
-    int overfloew, hash;
+    int overflow = 0, hash, n;
+    char* buffer;
 
     printf("sending file %s...\n", filename);
-
     //get the siez of the file
     fp = fopen(filename, "rb");
-    if (fp == NULL) {printf("File %s does not exsit\n", filename); return;}
+    if (fp == NULL) {printf("File %s does not exsit\n", filename); return;}  
+    hash = md5_hash(fp);
     fseek(fp, 0, SEEK_END);
-    file_size = ftell(fp);
+    file_size = ftell(fp);  
     fclose(fp);
-    
+        
     //break file into pieces
-    hash = md5_hash(filename);
-    overfloew = file_size % 4;
+    overflow = file_size % 4;
     chunk_size = file_size /4;
-
+    create_chunks(filename, chunk_size, overflow);
+    /*
+    //send chuncks to each of the servers
     for (int i = 0; i < 4; i++) {
         switch (i) {
             case 0:
-    
+                if (conn1 != -1) {
+                    c1 = file_table[hash][0].e1;
+                    c2 = file_table[hash][0].e2;
+                    send_file(conn1, c1, chunk_size, overflow, filename);
+                    send_file(conn1, c2, chunk_size, overflow, filename);
+                }
                 break;
             case 1:
-              
+                if (conn2 != -1) {
+                    c1 = file_table[hash][1].e1;
+                    c2 = file_table[hash][1].e2;
+                    send_file(conn2, c1, chunk_size, overflow, filename);
+                    send_file(conn2, c2, chunk_size, overflow, filename);
+                }
                 break;
             case 2:
-           
+                if (conn3 != -1) {
+                    c1 = file_table[hash][2].e1;
+                    c2 = file_table[hash][2].e2;
+                    send_file(conn3, c1, chunk_size, overflow, filename);
+                    send_file(conn3, c2, chunk_size, overflow, filename);
+                }
                 break;
             case 3:
-               
+                if (conn3 != -1) {
+                    c1 = file_table[hash][3].e1;
+                    c2 = file_table[hash][3].e2;
+                    send_file(conn4, c1, chunk_size, overflow, filename);
+                    send_file(conn4, c2, chunk_size, overflow, filename);
+                }
                 break;
         }
     }
+    */
 }
 
 //get a file from the server
@@ -319,11 +422,7 @@ int main(int argc, char** argv) {
     size_t input_size = 0;
     ssize_t len;
     char filename[MAX_FILENAME_LEN], choice[5];
-
-    FILE *fp = fopen("hello.txt", "rb");
-    printf("%d\n", md5_hash(fp));
-    fclose(fp);
-    /*  
+  
     if (argc != 2) { printf("Usage: dfc [config file (.conf)]\n"); return -1;}
 
     config_data = create_config(argv[1]);
@@ -334,7 +433,7 @@ int main(int argc, char** argv) {
         bzero(filename, MAX_FILENAME_LEN);
         prompt();
         bzero(input, input_size);
-        bzero(choice, 10);
+        bzero(choice, 5);
 
         len = getline(&input, &input_size, stdin);
         if (len == -1) {printf("Error getting input\n"); return -1;}
@@ -364,6 +463,5 @@ int main(int argc, char** argv) {
     }
     
     if (input) free(input); //free the line
-    */
     return 0;
 }
