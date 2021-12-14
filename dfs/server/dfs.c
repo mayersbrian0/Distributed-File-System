@@ -48,12 +48,66 @@ int open_serverfd(int port) {
     return serverfd;
 }
 
-void list() {
-    printf("In list\n");
+void list(int connection_fd, char* path_to_dir) {
+    DIR* dir;
+    struct dirent* in_file;
+    ssize_t bytes_sent;
+    char buffer[PACKET_SIZE];
+    char temp_buffer[257];
+
+    bzero(buffer, PACKET_SIZE);
+    dir = opendir(path_to_dir);
+    while ((in_file = readdir(dir))) {
+        if (strncmp(in_file->d_name, ".",1) == 0) continue;
+        if (strncmp(in_file->d_name, "..", 2) == 0) continue;
+        bzero(temp_buffer, 257);
+        sprintf(temp_buffer, "%s\n", in_file->d_name);
+        strncat(buffer, temp_buffer, strlen(temp_buffer));
+    }
+    closedir(dir);
+
+    bytes_sent = write(connection_fd, buffer, strlen(buffer));
 }
 
-void get(int connection_fd) {
+void get(int connection_fd, char* filename, char* path_to_dir) {
+    DIR* dir;
+    FILE* fp;
+    struct dirent* in_file;
+    char piece_name[257];
+    char path[260];
+    char buffer[PACKET_SIZE];
+    char res[5];
+    int n, num_files = 0;
+    
+    dir = opendir(path_to_dir);
+    while ((in_file = readdir(dir))) {
+        if (strncmp(in_file->d_name, filename, strlen(filename)) == 0) {
+            bzero(piece_name, 257);
+            sprintf(piece_name,"%s", in_file->d_name);
+            write(connection_fd, piece_name, strlen(piece_name));
 
+            bzero(res, 5);
+            read(connection_fd, res, 5);
+            if (strncmp(res, "ACK",3) != 0) exit(-1);
+
+            bzero(path, 260);
+            sprintf(path, "%s/%s\0", path_to_dir, piece_name);
+            fp = fopen(path, "rb");
+            if (fp == NULL) printf("BRUH\n");
+            bzero(buffer, PACKET_SIZE);
+            while ((n = fread(buffer, 1, PACKET_SIZE, fp)) > 0) {
+                write(connection_fd, buffer, n);
+            }
+            fclose(fp);
+
+            bzero(res, 5);
+            read(connection_fd, res, 5);
+            if (strncmp(res, "ACK",3) != 0) exit(-1);
+        }
+    }
+
+    if (num_files < 2);
+    closedir(dir);
 }
 
 void put(int connection_fd, char* filename, char* path_to_dir) {
@@ -63,6 +117,10 @@ void put(int connection_fd, char* filename, char* path_to_dir) {
     char command[5];
     char new_filename[100];
     FILE* fp;
+    struct timeval timeout; 
+    timeout.tv_sec = 1;
+    timeout.tv_usec = 0;
+    setsockopt(connection_fd, SOL_SOCKET, SO_RCVTIMEO, &timeout,sizeof timeout); //set timeout when socket hangs
 
     //read one byte from the buffer (the two file pieces that will be transfered)
     bzero(num, 2);
@@ -115,10 +173,6 @@ void handle_req(int connection_fd, char* dir) {
     char *line = NULL;
     size_t line_size = 0;
     int match = 0;
-    struct timeval timeout; 
-    timeout.tv_sec = 1;
-    timeout.tv_usec = 0;
-    setsockopt(connection_fd, SOL_SOCKET, SO_RCVTIMEO, &timeout,sizeof timeout); //set timeout when socket hangs
 
     bzero(command,  1024);
     bytes_read = read(connection_fd, command, 1024);
@@ -172,7 +226,7 @@ void handle_req(int connection_fd, char* dir) {
 
 
     if (strncmp(choice, "get", 3) == 0) {
-        get(connection_fd);
+        get(connection_fd, filename, path_to_dir);
     }
 
     else if (strncmp(choice, "put", 3) == 0) {
@@ -181,7 +235,7 @@ void handle_req(int connection_fd, char* dir) {
     }
 
     else if (strncmp(choice, "list", 4) == 0)  {
-        list();
+        list(connection_fd, path_to_dir);
     }
 
 }

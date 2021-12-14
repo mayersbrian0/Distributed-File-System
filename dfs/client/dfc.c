@@ -26,6 +26,15 @@ typedef struct {
     int e2;
 } tuple;
 
+//used to check if file can be reconstructed after list call
+typedef struct {
+    char filename[40];
+    int p1;
+    int p2;
+    int p3;
+    int p4;
+} list_check;
+
 const tuple file_table[4][4] = {
     { {1,2}, {2,3}, {3,4}, {4,1} },
     { {4,1}, {1,2}, {2,3}, {3,4} },
@@ -190,8 +199,115 @@ void get_response(int conn_fd, char* req_buffer) {
     }
 }
 
-void list(int conn_fd) {
-    printf("listing files...\n");
+//MAKE MORE ROBUST LATER
+//for now assume that each server has 2 chunks
+void get(int conn_fd, char* filename) {
+    FILE *new_chunk;
+    char buffer[PACKET_SIZE];
+    char piece[40];
+    char res[5];
+    int can_create[4] = {0,0,0,0};
+    ssize_t bytes_read, bytes_send;
+    int n;
+    struct timeval timeout; 
+    timeout.tv_sec = 1;
+    timeout.tv_usec = 0;
+    setsockopt(conn_fd, SOL_SOCKET, SO_RCVTIMEO, &timeout,sizeof timeout);
+
+    bzero(piece, 40);
+    bytes_read = read(conn_fd, piece, 40);
+    
+    bzero(res, 5);
+    sprintf(res, "ACK");
+    write(conn_fd, res, 3);
+    
+    new_chunk = fopen(piece, "wb+");
+    bzero(buffer, PACKET_SIZE);
+    while ((n = read(conn_fd, buffer, PACKET_SIZE)) > 0) {
+        fwrite(buffer, 1, n, new_chunk);
+    }
+    fclose(new_chunk);
+
+    bzero(res, 5);
+    sprintf(res, "ACK");
+    write(conn_fd, res, 3);
+
+    bzero(piece, 40);
+    bytes_read = read(conn_fd, piece, 40);
+    
+    bzero(res, 5);
+    sprintf(res, "ACK");
+    write(conn_fd, res, 3);
+    
+    new_chunk = fopen(piece, "wb+");
+    bzero(buffer, PACKET_SIZE);
+    while ((n = read(conn_fd, buffer, PACKET_SIZE)) > 0) {
+        fwrite(buffer, 1, n, new_chunk);
+    }
+    fclose(new_chunk);
+
+    bzero(res, 5);
+    sprintf(res, "ACK");
+    write(conn_fd, res, 3);
+
+}
+
+//check if the file can be created and then reconstrcut it
+void get_file(char* filename) {
+    int can_create[4] = {0,0,0,0};
+    char name[50];
+    char buffer[PACKET_SIZE];
+    FILE* fp, *alt_fp;
+    int n = 0;
+
+    for (int i = 0; i < 4; i++) {
+        bzero(name, 50);
+        sprintf(name, "%s.%d",filename, i+1);
+        fp = fopen(name, "r");
+        if (fp != NULL) {fclose(fp); can_create[i] = 1;}
+    }
+
+    if (can_create[0] == 0 || can_create[1] == 0 || can_create[2] == 0 || can_create[3] == 0) {
+        printf("File is incomplete\n");
+        return;
+    }
+
+    //save the file
+    fp = fopen(filename, "wb+");
+    for (int i = 0; i < 4; i++) {
+        sprintf(name, "%s.%d",filename, i+1);
+        alt_fp = fopen(name, "rb");
+        while ( (n = fread(buffer, 1, PACKET_SIZE, alt_fp)) > 0) {
+            fwrite(buffer, 1, n, fp);
+        }
+    }
+    fclose(fp);
+
+    printf("File added\n");
+    //remove the pieces when done
+    for (int i = 0; i < 4; i++) {
+        bzero(name, 50);
+        sprintf(name, "%s.%d",filename, i+1);
+        remove(name);
+    }
+}
+
+//gets the files form each server
+void list_files(int conn_fd, FILE* tmp_fp) {
+    char list_buffer[PACKET_SIZE];
+    ssize_t bytes_read;
+
+    bzero(list_buffer, PACKET_SIZE);
+    bytes_read = read(conn_fd, list_buffer, PACKET_SIZE);
+    fwrite(list_buffer, 1, bytes_read, tmp_fp);
+}
+
+
+
+//inspects the files and determines if they can be reconstructed
+void print_list() {
+    FILE* fp;
+    //char holder[]
 }
 
 
@@ -302,17 +418,16 @@ void put(char* filename, int conn, int serv_num) {
     free_chunks(filename);
 }
 
-//get a file from the server
-void get(char* filename) {
-    printf("getting file %s...\n", filename);
-}
-
 //list files on a server
 void handle_command(config* config_data, char* choice, char* filename) {
     int conn1, conn2, conn3, conn4;
+    FILE* list_fp;
     ssize_t bytes_read;
     char req_buffer[1024];
 
+    //store the list file names if called
+    list_fp = fopen("list_temp.txt", "wb+");
+    
     //connect to the four servers
     for (int i = 0; i < 4; i++) {
         switch (i) {
@@ -322,11 +437,11 @@ void handle_command(config* config_data, char* choice, char* filename) {
                     send_command(config_data, conn1, req_buffer, choice, filename);
                     get_response(conn1, req_buffer); 
                     if (strncmp(choice, "list", 4) == 0) {
-                        list(conn1);
+                        list_files(conn1, list_fp);
                     }
 
                     else if (strncmp(choice, "get", 3) == 0) {
-                        get(filename);
+                        get(conn1, filename);
                     }
 
                     else if (strncmp(choice, "put", 3) == 0) {
@@ -340,29 +455,31 @@ void handle_command(config* config_data, char* choice, char* filename) {
                     send_command(config_data, conn2, req_buffer, choice, filename);
                     get_response(conn2, req_buffer); 
                     if (strncmp(choice, "list", 4) == 0) {
-                        list(conn2);
+                        list_files(conn2, list_fp);
                     }
 
                     else if (strncmp(choice, "get", 3) == 0) {
-                        get(filename);
+                        get(conn2, filename);
                     }
 
                     else if (strncmp(choice, "put", 3) == 0) {
                         put(filename, conn2, 1);
                     }
                 }
-                break;
+                break;if (strncmp(choice, "list", 4) == 0) {
+                        list(conn2, list_fp);
+                    }
             case 2:
                 conn3 = create_connection(config_data->dfs3);
                 if (conn3 != -1)  {
                     send_command(config_data, conn3, req_buffer, choice, filename);
                     get_response(conn3, req_buffer); 
                     if (strncmp(choice, "list", 4) == 0) {
-                        list(conn3);
+                        list_files(conn3, list_fp);
                     }
 
                     else if (strncmp(choice, "get", 3) == 0) {
-                        get(filename);
+                        get(conn3,filename);
                     }
 
                     else if (strncmp(choice, "put", 3) == 0) {
@@ -376,11 +493,11 @@ void handle_command(config* config_data, char* choice, char* filename) {
                     send_command(config_data, conn4, req_buffer, choice, filename);
                     get_response(conn4, req_buffer); 
                     if (strncmp(choice, "list", 4) == 0) {
-                        list(conn4);
+                        list_files(conn4, list_fp);
                     }
 
                     else if (strncmp(choice, "get", 3) == 0) {
-                        get(filename);
+                        get(conn4, filename);
                     }
 
                     else if (strncmp(choice, "put", 3) == 0) {
@@ -390,6 +507,9 @@ void handle_command(config* config_data, char* choice, char* filename) {
                 break;
         }
     } 
+    fclose(list_fp);
+    if (strncmp(choice, "list", 4) == 0) print_list();
+    if (strncmp(choice, "get", 3) == 0) get_file(filename);
 }
 
 int main(int argc, char** argv) {
