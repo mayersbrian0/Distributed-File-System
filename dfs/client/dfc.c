@@ -29,10 +29,10 @@ typedef struct {
 //used to check if file can be reconstructed after list call
 typedef struct {
     char filename[40];
-    int p1;
-    int p2;
-    int p3;
-    int p4;
+    int one;
+    int two;
+    int three;
+    int four;
 } list_check;
 
 const tuple file_table[4][4] = {
@@ -302,12 +302,118 @@ void list_files(int conn_fd, FILE* tmp_fp) {
     fwrite(list_buffer, 1, bytes_read, tmp_fp);
 }
 
-
-
 //inspects the files and determines if they can be reconstructed
 void print_list() {
     FILE* fp;
-    //char holder[]
+    list_check check[50]; //keep track of up to 50 files
+    bzero(check, 50);
+    char temp[50];
+    int size = 0, new = 1, num;
+    size_t input_size = 0;
+    char* line = NULL;
+
+    for (int i = 0; i < 50; i++) {
+        check[i].one = 0;
+        check[i].two = 0;
+        check[i].three = 0;
+        check[i].four = 0;
+    }
+
+    fp = fopen("list_temp.txt", "r");
+    while ( getline(&line, &input_size, fp) > 0) {
+        new = 1;
+        if (size == 0) {
+            bzero(check[size].filename, 40);
+            bzero(temp, 50);
+            //printf("%d %d %d %d\n", check[0].one, check[0].two, check[0].three, check[0].four);
+            sscanf(line, "%s\n", temp);
+            //printf("%s\n", line);
+            num = temp[strlen(temp) -1] - '0';
+            strncpy(check[size].filename, temp, strlen(temp));
+            switch (num) {
+                    case 1:
+                        check[size].one = 1;
+                        break;
+                    case 2:
+                        check[size].two = 1;
+                        break;
+                    case 3:
+                        check[size].three = 1;
+                        break;
+                    case 4:
+                        check[size].four = 1;
+                        break;
+            }
+            size++;
+        }
+
+        else {
+            bzero(temp, 50);
+            sscanf(line, "%s\n", temp);
+            num = temp[strlen(temp) -1] - '0';
+            for (int i = 0; i < size; i++) {
+                if (strncmp(temp, check[i].filename, strlen(temp) -1) == 0) {
+                    //printf("%s\n", line);
+                    //printf("%d %d %d %d\n", check[i].one, check[i].two, check[i].three, check[i].four);
+                    switch (num) {
+                        case 1:
+                            check[i].one = 1;
+                            //printf("In one\n");
+                            break;
+                        case 2:
+                            check[i].two = 1;
+                            //printf("IN two\n");
+                            break;
+                        case 3:
+                            check[i].three = 1;
+                            //printf("In three\n");
+                            break;
+                        case 4:
+                            check[i].four = 1;
+                            //printf("in  four\n");
+                            break;
+                    }
+                    new=0;
+                }
+            }
+
+            if (new == 1) {
+                bzero(check[size].filename, 40);
+                //printf("%s\n", temp);
+                //printf("%d %d %d %d\n", check[size].one, check[size].two, check[size].three, check[size].four);
+                strncpy(check[size].filename, temp, strlen(temp));
+                switch (num) {
+                    case 1:
+                        check[size].one = 1;
+                        break;
+                    case 2:
+                        check[size].two = 1;
+                        break;
+                    case 3:
+                        check[size].three = 1;
+                        break;
+                    case 4:
+                        check[size].four = 1;
+                        break;
+                }
+                size++;
+            }
+        }
+    }
+    if (line) free(line);
+
+    //printf("%d\n", check[2].p[3]);
+
+    for (int i = 0; i < size; i++) {
+        bzero(temp, 50);
+        strncpy(temp, check[i].filename, strlen(check[i].filename) -2);
+        //printf("%d %d %d %d\n", check[i].one, check[i].two, check[i].three, check[i].four);
+        if (check[i].one == 1 && check[i].two == 1 && check[i].three == 1 && check[i].four == 1) printf("%s\n", temp);
+        else printf("%s [incomplete]\n", temp);
+    }
+
+    fclose(fp);
+    remove("list_temp.txt");
 }
 
 
