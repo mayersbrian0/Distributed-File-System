@@ -64,7 +64,6 @@ void put(int connection_fd, char* filename, char* path_to_dir) {
     char new_filename[100];
     FILE* fp;
 
-    printf("In put\n");   
     //read one byte from the buffer (the two file pieces that will be transfered)
     bzero(num, 2);
     bytes_read = read(connection_fd, num, 1);
@@ -75,10 +74,8 @@ void put(int connection_fd, char* filename, char* path_to_dir) {
     fp = fopen(new_filename, "wb+");
     bzero(buffer, PACKET_SIZE);
     while ((bytes_read = read(connection_fd, buffer, PACKET_SIZE)) > 0) {
-        printf("%s\n", buffer);
         size_t written = fwrite(buffer,1, bytes_read, fp);
     }
-    printf("%d\n", bytes_read);
     fclose(fp);
 
     //send ACK

@@ -270,7 +270,7 @@ void free_chunks(char* filename) {
 }
 
 //put a file on the servers
-void put(char* filename, int conn1, int conn2, int conn3, int conn4) {
+void put(char* filename, int conn, int serv_num) {
     FILE* fp, *new_fp;
     int c1, c2;
     long int file_size; 
@@ -292,51 +292,12 @@ void put(char* filename, int conn1, int conn2, int conn3, int conn4) {
     chunk_size = file_size /4;
     create_chunks(filename, chunk_size, overflow);
 
-    
-    //send chuncks to each of the servers
-    for (int i = 0; i < 4; i++) {
-        switch (i) {
-            case 0:
-                if (conn1 != -1) {
-                    c1 = file_table[hash][0].e1;
-                    c2 = file_table[hash][0].e2;
-                    printf("%d\n", c1);
-                    printf("%d\n", c2);
-                    send_file(conn1, c1, chunk_size, overflow, filename);
-                    send_file(conn1, c2, chunk_size, overflow, filename);
-                }
-                break;
-            case 1:
-                if (conn2 != -1) {
-                    c1 = file_table[hash][1].e1;
-                    c2 = file_table[hash][1].e2;
-                    printf("%d\n", c1);
-                    printf("%d\n", c2);
-                    send_file(conn2, c1, chunk_size, overflow, filename);
-                    send_file(conn2, c2, chunk_size, overflow, filename);
-                }
-                break;
-                
-            case 2:
-                if (conn3 != -1) {
-                    c1 = file_table[hash][2].e1;
-                    c2 = file_table[hash][2].e2;
-                    send_file(conn3, c1, chunk_size, overflow, filename);
-                    send_file(conn3, c2, chunk_size, overflow, filename);
-                }
-                break;
-            case 3:
-                if (conn3 != -1) {
-                    c1 = file_table[hash][3].e1;
-                    c2 = file_table[hash][3].e2;
-                    send_file(conn4, c1, chunk_size, overflow, filename);
-                    send_file(conn4, c2, chunk_size, overflow, filename);
-                }
-                break;
-            default:
-                break;
-        }
-    }
+    c1 = file_table[hash][serv_num].e1;
+    c2 = file_table[hash][serv_num].e2;
+    printf("%d\n", c1);
+    printf("%d\n", c2);
+    send_file(conn, c1, chunk_size, overflow, filename);
+    send_file(conn, c2, chunk_size, overflow, filename);
     
     free_chunks(filename);
 }
@@ -357,69 +318,78 @@ void handle_command(config* config_data, char* choice, char* filename) {
         switch (i) {
             case 0:
                 conn1 = create_connection(config_data->dfs1);
+                if (conn1 != -1)  {
+                    send_command(config_data, conn1, req_buffer, choice, filename);
+                    get_response(conn1, req_buffer); 
+                    if (strncmp(choice, "list", 4) == 0) {
+                        list(conn1);
+                    }
+
+                    else if (strncmp(choice, "get", 3) == 0) {
+                        get(filename);
+                    }
+
+                    else if (strncmp(choice, "put", 3) == 0) {
+                        put(filename, conn1, 0);
+                    }
+                }
                 break;
             case 1:
                 conn2 = create_connection(config_data->dfs2);
+                if (conn2 != -1)  {
+                    send_command(config_data, conn2, req_buffer, choice, filename);
+                    get_response(conn2, req_buffer); 
+                    if (strncmp(choice, "list", 4) == 0) {
+                        list(conn2);
+                    }
+
+                    else if (strncmp(choice, "get", 3) == 0) {
+                        get(filename);
+                    }
+
+                    else if (strncmp(choice, "put", 3) == 0) {
+                        put(filename, conn2, 1);
+                    }
+                }
                 break;
             case 2:
                 conn3 = create_connection(config_data->dfs3);
+                if (conn3 != -1)  {
+                    send_command(config_data, conn3, req_buffer, choice, filename);
+                    get_response(conn3, req_buffer); 
+                    if (strncmp(choice, "list", 4) == 0) {
+                        list(conn3);
+                    }
+
+                    else if (strncmp(choice, "get", 3) == 0) {
+                        get(filename);
+                    }
+
+                    else if (strncmp(choice, "put", 3) == 0) {
+                        put(filename, conn3, 2);
+                    }
+                }
                 break;
             case 3:
                 conn4 = create_connection(config_data->dfs4);
-                break;
-        }
-    }
-    
-    //send the command and username/password to open servers
-    for (int i = 0; i < 4; i++) {
-        switch (i) {
-            case 0:
-                if (conn1 != -1) send_command(config_data, conn1, req_buffer, choice, filename);
-                break;
-            case 1:
-                if (conn2 != -1) send_command(config_data, conn2, req_buffer, choice, filename);
-                break;
-            case 2:
-                if (conn3 != -1) send_command(config_data, conn3, req_buffer, choice, filename);
-                break;
-            case 3:
-                if (conn3 != -1) send_command(config_data, conn4, req_buffer, choice, filename);
-                break;
-        }
-    }   
-    
-    //get response from servers: either invalid or confirmation about sending the file
-    for (int i = 0; i < 4; i++) {
-        switch (i) {
-            case 0:
-                if (conn1 != -1) get_response(conn1, req_buffer); 
-                break;
-            case 1:
-                if (conn2 != -1) get_response(conn2, req_buffer);
-                break;
-            case 2:
-                if (conn3 != -1) get_response(conn3, req_buffer);
-                break;
-            case 3:
-                if (conn3 != -1) get_response(conn4, req_buffer); 
-                break;
-        }
-    }    
-    
-    //handle the command if valid "handshake/verification" occurs
-    //program exits there are invalid credentials
-    if (strncmp(choice, "list", 4) == 0) {
-        list(conn1);
-    }
+                if (conn4 != -1)  {
+                    send_command(config_data, conn4, req_buffer, choice, filename);
+                    get_response(conn4, req_buffer); 
+                    if (strncmp(choice, "list", 4) == 0) {
+                        list(conn4);
+                    }
 
-    else if (strncmp(choice, "get", 3) == 0) {
-        get(filename);
-    }
+                    else if (strncmp(choice, "get", 3) == 0) {
+                        get(filename);
+                    }
 
-    else if (strncmp(choice, "put", 3) == 0) {
-        put(filename, conn1, conn2, conn3, conn4);
-    }
-    
+                    else if (strncmp(choice, "put", 3) == 0) {
+                        put(filename, conn4, 3);
+                    }
+                }
+                break;
+        }
+    } 
 }
 
 int main(int argc, char** argv) {
