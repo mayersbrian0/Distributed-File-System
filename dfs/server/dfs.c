@@ -13,6 +13,8 @@
 #include <dirent.h>
 #include <openssl/md5.h>
 
+#define PACKET_SIZE 1024
+
 typedef struct {
     int* connection_fd;
     char* dir;
@@ -46,21 +48,63 @@ int open_serverfd(int port) {
     return serverfd;
 }
 
-//create a directory for valid users that don't yet have one
-void create_dir() {
-
-}
-
 void list() {
+    printf("In list\n");
+}
+
+void get(int connection_fd) {
 
 }
 
-void get() {
+void put(int connection_fd, char* filename, char* path_to_dir) {
+    ssize_t bytes_read, bytes_sent;
+    char buffer[PACKET_SIZE];
+    char num[2];
+    char command[5];
+    char new_filename[100];
+    FILE* fp;
 
-}
+    printf("In put\n");   
+    //read one byte from the buffer (the two file pieces that will be transfered)
+    bzero(num, 2);
+    bytes_read = read(connection_fd, num, 1);
 
-void put() {
+    bzero(new_filename, 100);
+    sprintf(new_filename, "%s/%s.%s",path_to_dir, filename, num);
 
+    fp = fopen(new_filename, "wb+");
+    bzero(buffer, PACKET_SIZE);
+    while ((bytes_read = read(connection_fd, buffer, PACKET_SIZE)) > 0) {
+        printf("%s\n", buffer);
+        size_t written = fwrite(buffer,1, bytes_read, fp);
+    }
+    printf("%d\n", bytes_read);
+    fclose(fp);
+
+    //send ACK
+    bzero(command, 5);
+    sprintf(command, "ACK");
+    bytes_sent = write(connection_fd, command, 3);
+
+    
+    bzero(num, 2);
+    bytes_read = 0;
+    bytes_read = read(connection_fd, num, 1);
+    bzero(new_filename, 60);
+    sprintf(new_filename, "%s/%s.%s", path_to_dir, filename, num);
+
+    fp = fopen(new_filename, "wb+");
+    bzero(buffer, PACKET_SIZE);
+    while ((bytes_read = read(connection_fd, buffer, PACKET_SIZE)) > 0) {
+        size_t written = fwrite(buffer,1, bytes_read, fp);
+    }
+    fclose(fp);
+
+    //send ACK
+    bzero(command, 5);
+    sprintf(command, "ACK");
+    bytes_sent = write(connection_fd, command, 3);
+    
 }
 
 /*
@@ -74,6 +118,10 @@ void handle_req(int connection_fd, char* dir) {
     char *line = NULL;
     size_t line_size = 0;
     int match = 0;
+    struct timeval timeout; 
+    timeout.tv_sec = 1;
+    timeout.tv_usec = 0;
+    setsockopt(connection_fd, SOL_SOCKET, SO_RCVTIMEO, &timeout,sizeof timeout); //set timeout when socket hangs
 
     bzero(command,  1024);
     bytes_read = read(connection_fd, command, 1024);
@@ -121,9 +169,23 @@ void handle_req(int connection_fd, char* dir) {
     sprintf(path_to_dir, "./%s/%s", dir, username);
     directory = opendir(path_to_dir);
     if (directory == NULL) {
-        mkdir(path_to_dir, S_IRWXU);
+        mkdir(path_to_dir, 0777);
     }
     closedir(directory);
+
+
+    if (strncmp(choice, "get", 3) == 0) {
+        get(connection_fd);
+    }
+
+    else if (strncmp(choice, "put", 3) == 0) {
+        put(connection_fd, filename, path_to_dir);
+        return;
+    }
+
+    else if (strncmp(choice, "list", 4) == 0)  {
+        list();
+    }
 
 }
 

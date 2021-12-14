@@ -291,7 +291,6 @@ void put(char* filename, int conn1, int conn2, int conn3, int conn4) {
     overflow = file_size % 4;
     chunk_size = file_size /4;
     create_chunks(filename, chunk_size, overflow);
-
     
     //send chuncks to each of the servers
     for (int i = 0; i < 4; i++) {
@@ -300,8 +299,6 @@ void put(char* filename, int conn1, int conn2, int conn3, int conn4) {
                 if (conn1 != -1) {
                     c1 = file_table[hash][0].e1;
                     c2 = file_table[hash][0].e2;
-                    printf("%d\n", c1);
-                    printf("%d\n", c2);
                     send_file(conn1, c1, chunk_size, overflow, filename);
                     send_file(conn1, c2, chunk_size, overflow, filename);
                 }
@@ -310,13 +307,11 @@ void put(char* filename, int conn1, int conn2, int conn3, int conn4) {
                 if (conn2 != -1) {
                     c1 = file_table[hash][1].e1;
                     c2 = file_table[hash][1].e2;
-                    printf("%d\n", c1);
-                    printf("%d\n", c2);
+                    printf("Hello\n");
                     send_file(conn2, c1, chunk_size, overflow, filename);
                     send_file(conn2, c2, chunk_size, overflow, filename);
                 }
                 break;
-                
             case 2:
                 if (conn3 != -1) {
                     c1 = file_table[hash][2].e1;
@@ -332,8 +327,6 @@ void put(char* filename, int conn1, int conn2, int conn3, int conn4) {
                     send_file(conn4, c1, chunk_size, overflow, filename);
                     send_file(conn4, c2, chunk_size, overflow, filename);
                 }
-                break;
-            default:
                 break;
         }
     }
@@ -405,7 +398,7 @@ void handle_command(config* config_data, char* choice, char* filename) {
                 break;
         }
     }    
-    
+
     //handle the command if valid "handshake/verification" occurs
     //program exits there are invalid credentials
     if (strncmp(choice, "list", 4) == 0) {
@@ -419,7 +412,6 @@ void handle_command(config* config_data, char* choice, char* filename) {
     else if (strncmp(choice, "put", 3) == 0) {
         put(filename, conn1, conn2, conn3, conn4);
     }
-    
 }
 
 int main(int argc, char** argv) {
